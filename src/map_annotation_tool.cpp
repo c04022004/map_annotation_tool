@@ -44,6 +44,7 @@
 #include "yaml-cpp/yaml.h"
 
 #include "map_annotation_tool.h"
+#include "yaml_helper.hpp"
 
 using namespace rviz;
 using namespace std;
@@ -64,6 +65,9 @@ void MapAnnotationTool::onInitialize()
   PoseTool::onInitialize();
   setName("Map Annotation Tool");
   setupRootProperties();
+  if(path_.empty()){
+    path_ = getPathToResourceFile();
+  }
   loadPosesFromFile();
 }
 
@@ -82,25 +86,40 @@ void MapAnnotationTool::setupRootProperties()
 std::string MapAnnotationTool::getPathToResourceFile()
 {
   std::stringstream ss;
-  ss << ros::package::getPath("mcr_default_env_config") << "/";
-  ss << std::getenv("ROBOT_ENV") << "/";
-  ss << "navigation_goals.yaml";
+  // ss << ros::package::getPath("mcr_default_env_config") << "/";
+  // ss << std::getenv("ROBOT_ENV") << "/";
+  // ss << "navigation_goals.yaml";
+  if(const char* env_p = std::getenv("NAV_GOAL_YAML")){
+    std::cerr << "Map_annotation_tool: NAV_GOAL_YAML set, reading file " << env_p << std::endl;
+    ss << env_p;
+  }else{
+    std::cerr << "Map_annotation_tool: NAV_GOAL_YAML not set, defaulting to '/tmp/navigation_goals.yaml'" << std::endl;
+    ss << "/tmp/navigation_goals.yaml";
+  }
 
   return ss.str();
 }
 
 void MapAnnotationTool::loadPosesFromFile()
 {
-  YAML::Node goals = YAML::LoadFile(getPathToResourceFile());
+  YAML::Node goals = YAML::LoadFile(path_);
   std::vector < std::string > names;
   std::vector < std::vector<float> > poses;
 
-  for (const auto& kv : goals)
+  // First collect all the keys
+  std::vector<std::string> keys(goals.size());
+  int key_it = 0;
+  for (YAML::const_iterator it = goals.begin(); it != goals.end(); ++it)
   {
-    std::string currentName = kv.first.as<std::string>();
+    keys[key_it++] = it->first.as<std::string>();
+  }
 
-    names.push_back(currentName);
-    poses.push_back(goals[currentName.c_str()].as<std::vector<float> >());
+  // Sort and load them back to the vector in correct order
+  sortKeyAlphanum(keys);
+  for(size_t i = 0; i < keys.size(); i++)
+  {
+    names.push_back(keys[i]);
+    poses.push_back(goals[keys[i]].as<std::vector<float> >());
   }
 
   generateMarkersFromPoses(names, poses);
@@ -129,8 +148,8 @@ void MapAnnotationTool::savePosesToFile()
     mainNode[name.c_str()] = pose;
   }
 
-  std::ofstream fout(getPathToResourceFile());
-  fout << mainNode;
+  std::ofstream fout(path_);
+  writeYamlOrderedMaps(fout, mainNode);
 }
 
 void MapAnnotationTool::generateMarkersFromPoses(
